@@ -27,6 +27,16 @@ type TreeModel struct {
 	Path     string `gorm:"column:Fpath" json:"path"`
 	Title    string `gorm:"column:Ftitle" json:"title"`
 }
+
+func (m TreeModel) Fields() sqlbuilder.Fields {
+	return sqlbuilder.Fields{
+		sqlbuilder.GetField(NewId[int]),
+		sqlbuilder.GetField(NewParentId),
+		sqlbuilder.GetField(NewPath),
+		sqlbuilder.GetField(NewTitle),
+	}
+}
+
 type TreeModels []TreeModel
 
 func (ms TreeModels) GetById(id int) (m *TreeModel, exists bool) {
@@ -156,16 +166,16 @@ func (s TreeService) DeleteNode(id int, fs ...*sqlbuilder.Field) error {
 	return err
 }
 
-func (s TreeService) getNodes(ids ...int) (models TreeModels, err error) {
+func (s TreeService) GetNodes(ids []int, models any) (err error) {
 	fields := sqlbuilder.Fields{
 		NewId(ids).SetRequired(true).AppendWhereFn(sqlbuilder.ValueFnForward),
 		NewDeletedAt(),
 	}.IntersectionUnionRequired(s.table.Fields())
-	err = s.GetTable().Repository().All(&models, fields)
+	err = s.GetTable().Repository().All(models, fields)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return models, nil
+	return nil
 }
 
 type MoveNodeIn struct {
@@ -175,8 +185,9 @@ type MoveNodeIn struct {
 
 // 移动节点（修改 parentId 与 path）
 func (s TreeService) MoveNode(id int, newParentID int) (err error) {
-
-	models, err := s.getNodes(id, int(newParentID))
+	ids := []int{id, newParentID}
+	models := TreeModels{}
+	err = s.GetNodes(ids, &models)
 	if err != nil {
 		return err
 	}
