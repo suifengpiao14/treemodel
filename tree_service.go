@@ -30,10 +30,10 @@ type TreeModel struct {
 
 func (m TreeModel) Fields() sqlbuilder.Fields {
 	return sqlbuilder.Fields{
-		sqlbuilder.GetField(NewId[int]),
-		sqlbuilder.GetField(NewParentId),
-		sqlbuilder.GetField(NewPath),
-		sqlbuilder.GetField(NewTitle),
+		NewId(m.Id),
+		NewParentId(m.ParentId),
+		NewPath(m.Path),
+		NewTitle(m.Title),
 	}
 }
 
