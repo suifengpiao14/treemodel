@@ -1,4 +1,4 @@
-package treemodel
+package field
 
 import (
 	"github.com/suifengpiao14/commonlanguage"
@@ -21,6 +21,4 @@ func NewTitle(title string) *sqlbuilder.Field {
 	return sqlbuilder.NewStringField(title, "title", "标题", 256)
 }
 
-func NewDeletedAt() *sqlbuilder.Field {
-	return commonlanguage.NewDeletedAt()
-}
+var NewDeletedAt = commonlanguage.NewDeletedAt

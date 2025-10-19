@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cast"
 	"github.com/suifengpiao14/sqlbuilder"
+	"github.com/suifengpiao14/treemodel/field"
 )
 
 type TreeService struct {
@@ -15,11 +16,11 @@ type TreeService struct {
 var DBHandler = sqlbuilder.NewGormHandler(sqlbuilder.DB2Gorm(sqlbuilder.GetDB, nil))
 
 var Table_tree = sqlbuilder.NewTableConfig("t_tree").WithHandler(DBHandler).AddColumns(
-	sqlbuilder.NewColumn("Fid", sqlbuilder.GetField(NewId[int]).SetModelRequered(true)),
-	sqlbuilder.NewColumn("Fparent_id", sqlbuilder.GetField(NewParentId).SetModelRequered(true)),
-	sqlbuilder.NewColumn("Fpath", sqlbuilder.GetField(NewPath)),
-	sqlbuilder.NewColumn("Ftitle", sqlbuilder.GetField(NewTitle)),
-	sqlbuilder.NewColumn("Fdeleted_at", NewDeletedAt()),
+	sqlbuilder.NewColumn("Fid", sqlbuilder.GetField(field.NewId[int]).SetModelRequered(true)),
+	sqlbuilder.NewColumn("Fparent_id", sqlbuilder.GetField(field.NewParentId).SetModelRequered(true)),
+	sqlbuilder.NewColumn("Fpath", sqlbuilder.GetField(field.NewPath)),
+	sqlbuilder.NewColumn("Ftitle", sqlbuilder.GetField(field.NewTitle)),
+	sqlbuilder.NewColumn("Fdeleted_at", field.NewDeletedAt()),
 )
 
 type TreeModel struct {
@@ -31,10 +32,10 @@ type TreeModel struct {
 
 func (m TreeModel) Fields() sqlbuilder.Fields {
 	return sqlbuilder.Fields{
-		NewId(m.Id),
-		NewParentId(m.ParentId),
-		NewPath(m.Path),
-		NewTitle(m.Title),
+		field.NewId(m.Id),
+		field.NewParentId(m.ParentId),
+		field.NewPath(m.Path),
+		field.NewTitle(m.Title),
 	}
 }
 
@@ -68,8 +69,8 @@ type AddNodeIn struct {
 
 func (in AddNodeIn) Fields() sqlbuilder.Fields {
 	return sqlbuilder.Fields{
-		NewParentId(in.ParentId).SetRequired(true).SetAllowZero(true),
-		NewTitle(in.Title),
+		field.NewParentId(in.ParentId).SetRequired(true).SetAllowZero(true),
+		field.NewTitle(in.Title).SetRequired(true),
 	}.Add(in.ExtraFields...)
 }
 
@@ -86,15 +87,18 @@ func (s TreeService) AddNode(in AddNodeIn) (err error) {
 		if err != nil {
 			return err
 		}
-		path := s.buildPath(parent.Path, int(id))
-		pathFs := sqlbuilder.Fields{
-			NewId(int(id)).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward), // where id = ?
-			NewPath(path),
+		if s.table.Columns.Fields().Contains(sqlbuilder.GetField(field.NewPath)) { // 如果表中有path字段，则需要更新path
+			path := s.buildPath(parent.Path, int(id))
+			pathFs := sqlbuilder.Fields{
+				field.NewId(int(id)).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward), // where id = ?
+				field.NewPath(path),
+			}
+			err = s.table.Repository().Update(pathFs)
+			if err != nil {
+				return err
+			}
 		}
-		err = s.table.Repository().Update(pathFs)
-		if err != nil {
-			return err
-		}
+
 		return nil
 	})
 	if err != nil {
@@ -106,8 +110,8 @@ func (s TreeService) AddNode(in AddNodeIn) (err error) {
 // getNode 获取节点信息 内部使用,因为固定返回TreeModel 模型
 func (s TreeService) getNode(id int) (model *TreeModel, err error) {
 	fields := sqlbuilder.Fields{
-		NewId(id).SetRequired(true).AppendWhereFn(sqlbuilder.ValueFnForward),
-		NewDeletedAt(),
+		field.NewId(id).SetRequired(true).AppendWhereFn(sqlbuilder.ValueFnForward),
+		field.NewDeletedAt(),
 	}
 	model = &TreeModel{}
 	err = s.table.Repository().FirstMustExists(model, fields)
@@ -125,8 +129,8 @@ type UpdateIn struct {
 
 func (in UpdateIn) Fields() sqlbuilder.Fields {
 	return sqlbuilder.Fields{
-		NewId(int(in.Id)).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward), // where id = ?
-		NewTitle(in.Title),
+		field.NewId(int(in.Id)).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward), // where id = ?
+		field.NewTitle(in.Title),
 	}.Add(in.ExtraFields...)
 }
 
@@ -142,8 +146,8 @@ func (s TreeService) UpdateNode(in UpdateIn) error {
 // 删除节点（逻辑删除）
 func (s TreeService) DeleteNode(id int, fs ...*sqlbuilder.Field) error {
 	fields := sqlbuilder.Fields{
-		NewId(id).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward),
-		NewDeletedAt().SetRequired(true),
+		field.NewId(id).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward),
+		field.NewDeletedAt().SetRequired(true),
 	}.Add(fs...)
 	err := s.table.Repository().Update(fields)
 	if err != nil {
@@ -154,8 +158,8 @@ func (s TreeService) DeleteNode(id int, fs ...*sqlbuilder.Field) error {
 
 func (s TreeService) GetNodes(ids []int, models any) (err error) {
 	fields := sqlbuilder.Fields{
-		NewId(ids).SetRequired(true).AppendWhereFn(sqlbuilder.ValueFnForward),
-		NewDeletedAt(),
+		field.NewId(ids).SetRequired(true).AppendWhereFn(sqlbuilder.ValueFnForward),
+		field.NewDeletedAt(),
 	}
 	err = s.table.Repository().All(models, fields)
 	if err != nil {
@@ -188,8 +192,8 @@ func (s TreeService) MoveNode(id int, newParentID int) (err error) {
 	}
 
 	fields := sqlbuilder.Fields{
-		NewId(id).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward),
-		NewParentId(newParentID).SetRequired(true).SetAllowZero(true),
+		field.NewId(id).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward),
+		field.NewParentId(newParentID).SetRequired(true).SetAllowZero(true),
 	}
 
 	oldPath := model.Path
@@ -201,7 +205,7 @@ func (s TreeService) MoveNode(id int, newParentID int) (err error) {
 		WHERE Fpath LIKE CONCAT(?, '%');
 	*/
 	pathFs := sqlbuilder.Fields{
-		NewPath(newPath).AppendWhereFn(sqlbuilder.ValueFnWhereLikev2(false, true)).Apply(func(f *sqlbuilder.Field, fs ...*sqlbuilder.Field) {
+		field.NewPath(newPath).AppendWhereFn(sqlbuilder.ValueFnWhereLikev2(false, true)).Apply(func(f *sqlbuilder.Field, fs ...*sqlbuilder.Field) {
 			f.ValueFns.Append(sqlbuilder.ValueFnOnlyForData(sqlbuilder.ValueFnReplace(oldPath)))
 		}),
 	}
@@ -232,8 +236,8 @@ func (s TreeService) buildPath(parentPath string, id int) string {
 // 查子树：where path like "prefix%"
 func (s TreeService) GetSubTree(pathPrefix string, dst any) (err error) {
 	fields := sqlbuilder.Fields{
-		NewPath(pathPrefix).SetRequired(true).SetAllowZero(true).AppendWhereFn(sqlbuilder.ValueFnWhereLikev2(false, true)),
-		NewDeletedAt(),
+		field.NewPath(pathPrefix).SetRequired(true).SetAllowZero(true).AppendWhereFn(sqlbuilder.ValueFnWhereLikev2(false, true)),
+		field.NewDeletedAt(),
 	}
 	err = s.table.Repository().All(dst, fields)
 	if err != nil {
@@ -252,8 +256,8 @@ func (s TreeService) GetAncestors(path string, dst any) (err error) {
 	}
 
 	fields := sqlbuilder.Fields{
-		NewId(ids).SetRequired(true).SetAllowZero(true).AppendWhereFn(sqlbuilder.ValueFnForward),
-		NewDeletedAt(),
+		field.NewId(ids).SetRequired(true).SetAllowZero(true).AppendWhereFn(sqlbuilder.ValueFnForward),
+		field.NewDeletedAt(),
 	}
 	err = s.table.Repository().All(dst, fields)
 	if err != nil {
