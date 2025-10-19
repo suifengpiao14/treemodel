@@ -55,7 +55,7 @@ func NewTreeService(table sqlbuilder.TableConfig) TreeService {
 		panic(err)
 	}
 	return TreeService{
-		table: Table_tree,
+		table: table,
 	}
 }
 
