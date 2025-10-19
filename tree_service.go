@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/doug-martin/goqu/v9"
 	"github.com/spf13/cast"
 	"github.com/suifengpiao14/sqlbuilder"
 )
@@ -13,19 +12,21 @@ type TreeService struct {
 	table sqlbuilder.TableConfig
 }
 
-var table_tree = sqlbuilder.NewTableConfig("t_tree").AddColumns(
-	sqlbuilder.NewColumn("Fid", sqlbuilder.GetField(NewId[int])),
-	sqlbuilder.NewColumn("Fparent_id", sqlbuilder.GetField(NewParentId)),
+var DBHandler = sqlbuilder.NewGormHandler(sqlbuilder.DB2Gorm(sqlbuilder.GetDB, nil))
+
+var Table_tree = sqlbuilder.NewTableConfig("t_tree").WithHandler(DBHandler).AddColumns(
+	sqlbuilder.NewColumn("Fid", sqlbuilder.GetField(NewId[int]).SetModelRequered(true)),
+	sqlbuilder.NewColumn("Fparent_id", sqlbuilder.GetField(NewParentId).SetModelRequered(true)),
 	sqlbuilder.NewColumn("Fpath", sqlbuilder.GetField(NewPath)),
 	sqlbuilder.NewColumn("Ftitle", sqlbuilder.GetField(NewTitle)),
 	sqlbuilder.NewColumn("Fdeleted_at", NewDeletedAt()),
 )
 
 type TreeModel struct {
-	Id       int    `gorm:"column:Fid" json:"id"`
-	ParentId int    `gorm:"column:Fparent_id" json:"parentId"`
-	Path     string `gorm:"column:Fpath" json:"path"`
-	Title    string `gorm:"column:Ftitle" json:"title"`
+	Id       int    `gorm:"column:id" json:"id"`
+	ParentId int    `gorm:"column:parentId" json:"parentId"`
+	Path     string `gorm:"column:path" json:"path"`
+	Title    string `gorm:"column:title" json:"title"`
 }
 
 func (m TreeModel) Fields() sqlbuilder.Fields {
@@ -48,27 +49,14 @@ func (ms TreeModels) GetById(id int) (m *TreeModel, exists bool) {
 	return nil, false
 }
 
-func NewTreeService() TreeService {
-	return TreeService{
-		table: table_tree,
-	}
-}
-
-func (s TreeService) WithTable(tableConfig sqlbuilder.TableConfig) TreeService {
-	//树状结构中，id和parentId是必须的字段
-	err := sqlbuilder.CheckMissFieldName(tableConfig,
-		sqlbuilder.GetFieldName(NewId[int]),
-		sqlbuilder.GetFieldName(NewParentId),
-	)
+func NewTreeService(table sqlbuilder.TableConfig) TreeService {
+	err := table.CheckMissOutFieldName(Table_tree)
 	if err != nil {
 		panic(err)
 	}
-	s.table = tableConfig
-	return s
-}
-
-func (s TreeService) GetTable() sqlbuilder.TableConfig {
-	return s.table
+	return TreeService{
+		table: Table_tree,
+	}
 }
 
 // 新增节点
@@ -93,9 +81,8 @@ func (s TreeService) AddNode(in AddNodeIn) (err error) {
 			return err
 		}
 	}
-	fs := in.Fields().IntersectionUnionRequired(s.table.Fields())
-	err = s.GetTable().Repository().Transaction(func(txRepository sqlbuilder.Repository) (err error) {
-		id, _, err := txRepository.InsertWithLastId(fs)
+	err = s.table.Repository().Transaction(func(txRepository sqlbuilder.Repository) (err error) {
+		id, _, err := txRepository.InsertWithLastId(in.Fields())
 		if err != nil {
 			return err
 		}
@@ -104,7 +91,7 @@ func (s TreeService) AddNode(in AddNodeIn) (err error) {
 			NewId(int(id)).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward), // where id = ?
 			NewPath(path),
 		}
-		err = s.GetTable().Repository().Update(pathFs)
+		err = s.table.Repository().Update(pathFs)
 		if err != nil {
 			return err
 		}
@@ -121,9 +108,9 @@ func (s TreeService) getNode(id int) (model *TreeModel, err error) {
 	fields := sqlbuilder.Fields{
 		NewId(id).SetRequired(true).AppendWhereFn(sqlbuilder.ValueFnForward),
 		NewDeletedAt(),
-	}.IntersectionUnionRequired(s.table.Fields())
+	}
 	model = &TreeModel{}
-	err = s.GetTable().Repository().FirstMustExists(model, fields)
+	err = s.table.Repository().FirstMustExists(model, fields)
 	if err != nil {
 		return nil, err
 	}
@@ -145,8 +132,7 @@ func (in UpdateIn) Fields() sqlbuilder.Fields {
 
 // 修改节点
 func (s TreeService) UpdateNode(in UpdateIn) error {
-	fields := in.Fields().IntersectionUnionRequired(s.table.Fields())
-	err := s.GetTable().Repository().Update(fields)
+	err := s.table.Repository().Update(in.Fields())
 	if err != nil {
 		return err
 	}
@@ -158,8 +144,8 @@ func (s TreeService) DeleteNode(id int, fs ...*sqlbuilder.Field) error {
 	fields := sqlbuilder.Fields{
 		NewId(id).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward),
 		NewDeletedAt().SetRequired(true),
-	}.Add(fs...).IntersectionUnionRequired(s.table.Fields())
-	err := s.GetTable().Repository().Update(fields)
+	}.Add(fs...)
+	err := s.table.Repository().Update(fields)
 	if err != nil {
 		return err
 	}
@@ -170,8 +156,8 @@ func (s TreeService) GetNodes(ids []int, models any) (err error) {
 	fields := sqlbuilder.Fields{
 		NewId(ids).SetRequired(true).AppendWhereFn(sqlbuilder.ValueFnForward),
 		NewDeletedAt(),
-	}.IntersectionUnionRequired(s.table.Fields())
-	err = s.GetTable().Repository().All(models, fields)
+	}
+	err = s.table.Repository().All(models, fields)
 	if err != nil {
 		return err
 	}
@@ -204,7 +190,7 @@ func (s TreeService) MoveNode(id int, newParentID int) (err error) {
 	fields := sqlbuilder.Fields{
 		NewId(id).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward),
 		NewParentId(newParentID).SetRequired(true).SetAllowZero(true),
-	}.IntersectionUnionRequired(s.table.Fields())
+	}
 
 	oldPath := model.Path
 	newPath := s.buildPath(parent.Path, id)
@@ -215,15 +201,12 @@ func (s TreeService) MoveNode(id int, newParentID int) (err error) {
 		WHERE Fpath LIKE CONCAT(?, '%');
 	*/
 	pathFs := sqlbuilder.Fields{
-		NewPath(oldPath).AppendWhereFn(sqlbuilder.ValueFnWhereLikev2(false, true)).Apply(func(f *sqlbuilder.Field, fs ...*sqlbuilder.Field) {
-			f.ValueFns.Append(sqlbuilder.ValueFnOnlyForData(func(inputValue any, f *sqlbuilder.Field, fs ...*sqlbuilder.Field) (any, error) {
-				val := goqu.L(fmt.Sprintf("REPLACE(%s,?,?)", f.DBColumnName().BaseNameWithQuotes()), oldPath, newPath)
-				return val, nil
-			}))
+		NewPath(newPath).AppendWhereFn(sqlbuilder.ValueFnWhereLikev2(false, true)).Apply(func(f *sqlbuilder.Field, fs ...*sqlbuilder.Field) {
+			f.ValueFns.Append(sqlbuilder.ValueFnOnlyForData(sqlbuilder.ValueFnReplace(oldPath)))
 		}),
-	}.IntersectionUnionRequired(s.table.Fields())
+	}
 
-	err = s.GetTable().Repository().Transaction(func(txRepository sqlbuilder.Repository) (err error) {
+	err = s.table.Repository().Transaction(func(txRepository sqlbuilder.Repository) (err error) {
 		err = txRepository.Update(fields)
 		if err != nil {
 			return err
@@ -251,8 +234,8 @@ func (s TreeService) GetSubTree(pathPrefix string, dst any) (err error) {
 	fields := sqlbuilder.Fields{
 		NewPath(pathPrefix).SetRequired(true).SetAllowZero(true).AppendWhereFn(sqlbuilder.ValueFnWhereLikev2(false, true)),
 		NewDeletedAt(),
-	}.IntersectionUnionRequired(s.table.Fields())
-	err = s.GetTable().Repository().All(dst, fields)
+	}
+	err = s.table.Repository().All(dst, fields)
 	if err != nil {
 		return err
 	}
@@ -271,8 +254,8 @@ func (s TreeService) GetAncestors(path string, dst any) (err error) {
 	fields := sqlbuilder.Fields{
 		NewId(ids).SetRequired(true).SetAllowZero(true).AppendWhereFn(sqlbuilder.ValueFnForward),
 		NewDeletedAt(),
-	}.IntersectionUnionRequired(s.table.Fields())
-	err = s.GetTable().Repository().All(dst, fields)
+	}
+	err = s.table.Repository().All(dst, fields)
 	if err != nil {
 		return err
 	}
