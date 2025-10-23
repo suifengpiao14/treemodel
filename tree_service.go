@@ -10,44 +10,8 @@ import (
 )
 
 type TreeService struct {
-	table sqlbuilder.TableConfig
-}
-
-var DBHandler = sqlbuilder.NewGormHandler(sqlbuilder.DB2Gorm(sqlbuilder.GetDB, nil))
-
-var Table_tree = sqlbuilder.NewTableConfig("t_tree").WithHandler(DBHandler).AddColumns(
-	sqlbuilder.NewColumn("Fid", sqlbuilder.GetField(field.NewId[int]).SetModelRequered(true)),
-	sqlbuilder.NewColumn("Fparent_id", sqlbuilder.GetField(field.NewParentId).SetModelRequered(true)),
-	sqlbuilder.NewColumn("Fpath", sqlbuilder.GetField(field.NewPath)),
-	sqlbuilder.NewColumn("Ftitle", sqlbuilder.GetField(field.NewTitle)),
-	sqlbuilder.NewColumn("Fdeleted_at", field.NewDeletedAt()),
-)
-
-type TreeModel struct {
-	Id       int    `gorm:"column:id" json:"id"`
-	ParentId int    `gorm:"column:parentId" json:"parentId"`
-	Path     string `gorm:"column:path" json:"path"`
-	Title    string `gorm:"column:title" json:"title"`
-}
-
-func (m TreeModel) Fields() sqlbuilder.Fields {
-	return sqlbuilder.Fields{
-		field.NewId(m.Id),
-		field.NewParentId(m.ParentId),
-		field.NewPath(m.Path),
-		field.NewTitle(m.Title),
-	}
-}
-
-type TreeModels []TreeModel
-
-func (ms TreeModels) GetById(id int) (m *TreeModel, exists bool) {
-	for i := range ms {
-		if ms[i].Id == id {
-			return &ms[i], true
-		}
-	}
-	return nil, false
+	table          sqlbuilder.TableConfig
+	treeMiddleware _TreeMiddleware
 }
 
 func NewTreeService(table sqlbuilder.TableConfig) TreeService {
@@ -62,48 +26,25 @@ func NewTreeService(table sqlbuilder.TableConfig) TreeService {
 
 // 新增节点
 type AddNodeIn struct {
-	ParentId    int    `json:"parentId"`
-	Title       string `json:"title"`
-	ExtraFields sqlbuilder.Fields
+	ParentId int    `json:"parentId"`
+	Title    string `json:"title"`
 }
 
-func (in AddNodeIn) Fields() sqlbuilder.Fields {
+func (in *AddNodeIn) Fields() sqlbuilder.Fields {
 	return sqlbuilder.Fields{
-		field.NewParentId(in.ParentId).SetRequired(true).SetAllowZero(true),
-		field.NewTitle(in.Title).SetRequired(true),
-	}.Add(in.ExtraFields...)
+		field.NewParentId(0).BindValue(&in.ParentId).SetRequired(true).SetAllowZero(true),
+		field.NewTitle("").BindValue(&in.Title).SetRequired(true),
+	}
 }
 
 func (s TreeService) AddNode(in AddNodeIn) (err error) {
-	parent := &TreeModel{}
-	if in.ParentId > 0 {
-		parent, err = s.getNode(in.ParentId)
-		if err != nil {
-			return err
-		}
-	}
-	err = s.table.Repository().Transaction(func(txRepository sqlbuilder.Repository) (err error) {
-		id, _, err := txRepository.InsertWithLastId(in.Fields())
-		if err != nil {
-			return err
-		}
-		if s.table.Columns.Fields().Contains(sqlbuilder.GetField(field.NewPath)) { // 如果表中有path字段，则需要更新path
-			path := s.buildPath(parent.Path, int(id))
-			pathFs := sqlbuilder.Fields{
-				field.NewId(int(id)).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward), // where id = ?
-				field.NewPath(path),
-			}
-			err = s.table.Repository().Update(pathFs)
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
+	_, _, err = s.table.Repository().InsertWithLastId(in.Fields(), func(p *sqlbuilder.InsertParam) {
+		p.WithModelMiddleware(s.treeMiddleware.Add())
 	})
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -229,9 +170,6 @@ func (s TreeService) MoveNode(id int, newParentID int) (err error) {
 	return nil
 
 }
-func (s TreeService) buildPath(parentPath string, id int) string {
-	return fmt.Sprintf("%s/%d", parentPath, id)
-}
 
 // 查子树：where path like "prefix%"
 func (s TreeService) GetSubTree(pathPrefix string, dst any) (err error) {
@@ -264,4 +202,8 @@ func (s TreeService) GetAncestors(path string, dst any) (err error) {
 		return err
 	}
 	return nil
+}
+
+func (s TreeService) buildPath(parentPath string, id int) string {
+	return s.treeMiddleware.buildPath(parentPath, id)
 }
