@@ -91,6 +91,8 @@ github.com/suifengpiao14/sqlbuilder v0.2.29 h1:ncHhQyX8Oq1CXbZlAwE/lrTOt1sN3SGpj
 github.com/suifengpiao14/sqlbuilder v0.2.29/go.mod h1:fLlFkotHQEEc6wGr02vFgeozq20RMENwJsL5WZsNKfE=
 github.com/suifengpiao14/sshmysql v0.0.7 h1:PEBvDQr71ZYsF48Yf4CdkZROWnmU5CEBWqY2t0CHgas=
 github.com/suifengpiao14/sshmysql v0.0.7/go.mod h1:YvD7LCCDjrK/zr1YkiCGZK5ETDevY9NKsQkJ2XDRb5Y=
+gitlab.huishoubao.com/gopackage/treeflat v0.0.5 h1:FvUoSJ+JHfPWLwcTSb1gcMHlvlQbpy6VsXWN4UV3PSY=
+gitlab.huishoubao.com/gopackage/treeflat v0.0.5/go.mod h1:k7VvpyfWrA9KBr2jEGrngsVNwDA7You44M1CeRLdt/o=
 golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
 golang.org/x/crypto v0.0.0-20190325154230-a5d413f7728c/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
 golang.org/x/crypto v0.0.0-20190605123033-f99c8df09eb5/go.mod h1:yigFU9vqHzYiE8UmvKecakEJjdnWj3jj499lnFckfCI=

@@ -5,7 +5,7 @@ import (
 	"github.com/suifengpiao14/sqlbuilder"
 )
 
-func NewId[T int | []int](id T) *sqlbuilder.Field {
+func NewId(id int) *sqlbuilder.Field {
 	return commonlanguage.NewId(id)
 }
 

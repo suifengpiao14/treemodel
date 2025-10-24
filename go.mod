@@ -6,6 +6,7 @@ require (
 	github.com/spf13/cast v1.6.0
 	github.com/suifengpiao14/commonlanguage v0.0.23
 	github.com/suifengpiao14/sqlbuilder v0.2.29
+	gitlab.huishoubao.com/gopackage/treeflat v0.0.5
 )
 
 require (
