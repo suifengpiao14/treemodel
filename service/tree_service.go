@@ -6,14 +6,14 @@ import (
 	"github.com/suifengpiao14/treemodel/field"
 )
 
-// ExampleTreeService 服务类案例
-type ExampleTreeService struct {
+// TreeService 服务类案例
+type TreeService struct {
 	table          sqlbuilder.TableConfig
 	treeMiddleware treemodel.TreeMiddleware
 }
 
-func NewTreeService(table sqlbuilder.TableConfig) ExampleTreeService {
-	s := ExampleTreeService{
+func NewTreeService(table sqlbuilder.TableConfig) TreeService {
+	s := TreeService{
 		table: table,
 	}
 	treeTable := s.treeMiddleware.GetTable()
@@ -37,7 +37,7 @@ func (in *AddNodeIn) Fields() sqlbuilder.Fields {
 	}
 }
 
-func (s ExampleTreeService) AddNode(in AddNodeIn) (err error) {
+func (s TreeService) AddNode(in AddNodeIn) (err error) {
 	_, _, err = s.table.Repository().InsertWithLastId(in.Fields(), func(p *sqlbuilder.InsertParam) {
 		p.WithModelMiddleware(s.treeMiddleware.Insert())
 	})
@@ -54,14 +54,14 @@ type MoveNodeIn struct {
 }
 
 // 移动节点（修改 parentId 与 path）
-func (s ExampleTreeService) MoveNode(id int, newParentID int) (err error) {
+func (s TreeService) MoveNode(id int, newParentID int) (err error) {
 	fields := sqlbuilder.Fields{
 		field.NewId(id).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward),
 		field.NewParentId(newParentID).SetRequired(true).SetAllowZero(true),
 	}
 
 	err = s.table.Repository().Update(fields, func(p *sqlbuilder.UpdateParam) {
-		p.WithModelMiddleware(s.treeMiddleware.Update())
+		p.WithModelMiddleware(s.treeMiddleware.MoveNode())
 	})
 	if err != nil {
 		return err
@@ -71,7 +71,7 @@ func (s ExampleTreeService) MoveNode(id int, newParentID int) (err error) {
 }
 
 // 查子树：where path like "prefix%"
-func (s ExampleTreeService) GetSubTree(pathPrefix string, dst any) (err error) {
+func (s TreeService) GetSubTree(pathPrefix string, dst any) (err error) {
 	fields := sqlbuilder.Fields{
 		field.NewPath(pathPrefix),
 		field.NewDeletedAt(),
@@ -86,7 +86,7 @@ func (s ExampleTreeService) GetSubTree(pathPrefix string, dst any) (err error) {
 }
 
 // 查祖先节点：根据 path 拆分 id，再 where in
-func (s ExampleTreeService) GetAncestors(path string, dst any) (err error) {
+func (s TreeService) GetAncestors(path string, dst any) (err error) {
 	fields := sqlbuilder.Fields{
 		field.NewPath(path),
 		field.NewDeletedAt(),

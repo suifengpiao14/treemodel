@@ -11,8 +11,6 @@ import (
 	"gitlab.huishoubao.com/gopackage/treeflat"
 )
 
-var DBHandler = sqlbuilder.NewFieldIDBHandler(sqlbuilder.GetDB)
-
 type _TreeModel struct {
 	Id       int
 	ParentId int
@@ -49,10 +47,12 @@ func (m *_TreeModel) SetPath(path string) {
 type TreeMiddleware struct {
 }
 
+var _DBHandler = sqlbuilder.NewFieldIDBHandler(sqlbuilder.GetDB)
+
 func (s TreeMiddleware) GetTable() sqlbuilder.TableConfig {
 	var tableName = "t_tree"
 	var topic = fmt.Sprintf(`%s_be6097ae461af2796fc9c3c0bd1cd370`, tableName)
-	tableTree := sqlbuilder.NewTableConfig(tableName).WithHandler(DBHandler).AddColumns(
+	tableTree := sqlbuilder.NewTableConfig(tableName).WithHandler(_DBHandler).AddColumns(
 		sqlbuilder.NewColumn("Fid", sqlbuilder.GetField(field.NewId).SetModelRequered(true)),
 		sqlbuilder.NewColumn("Fparent_id", sqlbuilder.GetField(field.NewParentId).SetModelRequered(true)),
 		sqlbuilder.NewColumn("Fpath", sqlbuilder.GetField(field.NewPath)),
@@ -120,7 +120,7 @@ func (s TreeMiddleware) publishEvent(id int, operation string) (err error) {
 	return nil
 }
 
-func (s TreeMiddleware) Update() sqlbuilder.ModelMiddleware {
+func (s TreeMiddleware) MoveNode() sqlbuilder.ModelMiddleware {
 	return func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
 		table := fs.FirstMust().GetTable()
 		idField, err := fs.GetByNameAsError(sqlbuilder.GetFieldName(field.NewId))
