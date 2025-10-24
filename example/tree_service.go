@@ -1,9 +1,6 @@
 package example
 
 import (
-	"strings"
-
-	"github.com/spf13/cast"
 	"github.com/suifengpiao14/sqlbuilder"
 	"github.com/suifengpiao14/treemodel"
 	"github.com/suifengpiao14/treemodel/field"
@@ -90,13 +87,6 @@ func (s ExampleTreeService) GetSubTree(pathPrefix string, dst any) (err error) {
 
 // 查祖先节点：根据 path 拆分 id，再 where in
 func (s ExampleTreeService) GetAncestors(path string, dst any) (err error) {
-	// 假设 path = "1/3/8"
-	arr := strings.Split(path, "/")
-	ids := make([]int, 0)
-	for _, id := range arr {
-		ids = append(ids, cast.ToInt(id))
-	}
-
 	fields := sqlbuilder.Fields{
 		field.NewPath(path),
 		field.NewDeletedAt(),
