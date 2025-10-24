@@ -10,6 +10,29 @@ import (
 	"gitlab.huishoubao.com/gopackage/treeflat"
 )
 
+var tableName = "t_tree"
+var topic = fmt.Sprintf(`%s_be6097ae461af2796fc9c3c0bd1cd370`, tableName)
+var table_tree_config = sqlbuilder.NewTableConfig(tableName).AddColumns(
+	sqlbuilder.NewColumn("Fid", sqlbuilder.GetField(field.NewId).SetModelRequered(true)),
+	sqlbuilder.NewColumn("Fparent_id", sqlbuilder.GetField(field.NewParentId).SetModelRequered(true)),
+	sqlbuilder.NewColumn("Fpath", sqlbuilder.GetField(field.NewPath)),
+).WithTopic(topic)
+
+func init() {
+	table_tree_config = table_tree_config.WithConsumerMakers(func(table sqlbuilder.TableConfig) (consumer sqlbuilder.Consumer) {
+		//中间件内的handler 只能是sqlbuilder.FieldIDBHandler类型，应为组件内没有设置表字段和结构体映射关系
+		service := NewTreeMiddleware()
+		publishTable := table_tree_config.WithHandler(table.GetHandler().GetSqlDBHandler())
+		return sqlbuilder.MakeIdentityEventSubscriber(publishTable, func(model _TreeModel) (err error) {
+			err = service.fillPath(table, model.Id)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+	})
+}
+
 type _TreeModel struct {
 	Id       int
 	ParentId int
@@ -46,29 +69,8 @@ func (m *_TreeModel) SetPath(path string) {
 type TreeMiddleware struct {
 }
 
-var _DBHandler = sqlbuilder.NewFieldIDBHandler(sqlbuilder.GetDB)
-
-func (s TreeMiddleware) GetTable() sqlbuilder.TableConfig {
-	var tableName = "t_tree"
-	var topic = fmt.Sprintf(`%s_be6097ae461af2796fc9c3c0bd1cd370`, tableName)
-	tableTree := sqlbuilder.NewTableConfig(tableName).WithHandler(_DBHandler).AddColumns(
-		sqlbuilder.NewColumn("Fid", sqlbuilder.GetField(field.NewId).SetModelRequered(true)),
-		sqlbuilder.NewColumn("Fparent_id", sqlbuilder.GetField(field.NewParentId).SetModelRequered(true)),
-		sqlbuilder.NewColumn("Fpath", sqlbuilder.GetField(field.NewPath)),
-	)
-
-	tableTree.WithTopic(topic).WithConsumerMakers(func(table sqlbuilder.TableConfig) (consumer sqlbuilder.Consumer) {
-		publishTable := tableTree.WithHandler(table.GetHandler()).WithTableName(table.Name) //因为订阅自身模型事件，所以这里从自身运行时的表中获取 handler和table.Name
-		return sqlbuilder.MakeIdentityEventSubscriber(publishTable, func(model _TreeModel) (err error) {
-			err = s.fillPath(table, model.Id)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-	})
-
-	return tableTree
+func NewTreeMiddleware() TreeMiddleware {
+	return TreeMiddleware{}
 }
 
 func (s TreeMiddleware) Insert() sqlbuilder.ModelMiddleware {
@@ -103,7 +105,7 @@ func (s TreeMiddleware) Insert() sqlbuilder.ModelMiddleware {
 			return err
 		}
 		id := cast.ToInt(idField.GetOriginalValue())
-		err = s.publishEvent(id, sqlbuilder.Event_Operation_Insert)
+		err = s.publishEvent(table, id, sqlbuilder.Event_Operation_Insert)
 		if err != nil {
 			return err
 		}
@@ -111,13 +113,14 @@ func (s TreeMiddleware) Insert() sqlbuilder.ModelMiddleware {
 	}
 }
 
-func (s TreeMiddleware) publishEvent(id int, operation string) (err error) {
+func (s TreeMiddleware) publishEvent(table sqlbuilder.TableConfig, id int, operation string) (err error) {
 	event := sqlbuilder.IdentityEvent{
 		Operation:         operation,
 		IdentityValue:     cast.ToString(id),
 		IdentityFieldName: sqlbuilder.GetFieldName(field.NewId),
 	}
-	err = s.GetTable().Publish(event) //固定使用Table_tree 表名发布事件,避免多model中间件发布重复事件,避免重复消费事件
+	table_tree_config.WithHandler(table.GetHandler().GetSqlDBHandler()).Init()
+	err = table_tree_config.Publish(event) //固定使用Table_tree 表名发布事件,避免多model中间件发布重复事件,避免重复消费事件
 	if err != nil {
 		return err
 	}
@@ -160,7 +163,7 @@ func (s TreeMiddleware) MoveNode() sqlbuilder.ModelMiddleware {
 		}
 
 		if moveNodeIn.ParentId > 0 { //如果父节点有变化，则需要重新计算路径
-			err = s.publishEvent(moveNodeIn.Id, sqlbuilder.Event_Operation_Update)
+			err = s.publishEvent(table, moveNodeIn.Id, sqlbuilder.Event_Operation_Update)
 			if err != nil {
 				return err
 			}

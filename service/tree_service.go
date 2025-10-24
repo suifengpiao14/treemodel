@@ -16,7 +16,7 @@ func NewTreeService(table sqlbuilder.TableConfig) TreeService {
 	s := TreeService{
 		table: table,
 	}
-	treeTable := s.treeMiddleware.GetTable()
+	treeTable := s.treeMiddleware.GetMiddlewareTable(table)
 	err := table.CheckMissOutFieldName(treeTable)
 	if err != nil {
 		panic(err)
