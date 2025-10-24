@@ -1,7 +1,6 @@
 package treemodel
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -76,7 +75,12 @@ func (s TreeMiddleware) Insert() sqlbuilder.ModelMiddleware {
 	return func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
 		table := fs.FirstMust().GetTable()
 
-		parentIdField, err := fs.GetByNameAsError(sqlbuilder.GetFieldName(field.NewParentId))
+		parentFieldName, err := table.GetFieldNameByAlaisFeild(sqlbuilder.GetField(field.NewParentId))
+		if err != nil {
+			return err
+		}
+
+		parentIdField, err := fs.GetByNameAsError(parentFieldName)
 		if err != nil {
 			return err
 		}
@@ -120,35 +124,34 @@ func (s TreeMiddleware) publishEvent(id int, operation string) (err error) {
 	return nil
 }
 
+type _MoveNodeIn struct {
+	Id       int
+	ParentId int
+}
+
+func (in *_MoveNodeIn) Fields() sqlbuilder.Fields {
+	return sqlbuilder.Fields{
+		sqlbuilder.GetField(field.NewId).BindValue(&in.Id).SetRequired(true),
+		sqlbuilder.GetField(field.NewParentId).BindValue(&in.ParentId),
+	}
+}
+
+func (in *_MoveNodeIn) Validate() (err error) {
+	return in.Fields().Validate()
+}
+
 func (s TreeMiddleware) MoveNode() sqlbuilder.ModelMiddleware {
 	return func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
 		table := fs.FirstMust().GetTable()
-		idField, err := fs.GetByNameAsError(sqlbuilder.GetFieldName(field.NewId))
+		var moveNodeIn _MoveNodeIn
+
+		err = fs.UmarshalModel(&moveNodeIn, table)
 		if err != nil {
 			return err
 		}
-		id := cast.ToInt(idField.GetOriginalValue())
-		if id == 0 {
-			return fmt.Errorf("id is required")
-		}
-		parentId := 0
-		parentIdField, exists := fs.GetByName(sqlbuilder.GetFieldName(field.NewParentId))
-		if exists {
-			parentIdAny, err := parentIdField.GetValue(sqlbuilder.Layer_all, *fs...) // 需要排除where部分
-			if err != nil {
-				if errors.Is(err, sqlbuilder.ErrValueNil) { //如果为空，则不校验父节点是否存在
-					err = nil
-				} else {
-					return err
-				}
-			}
-			parentId = cast.ToInt(parentIdAny)
-			if parentId > 0 {
-				_, err := s.getNode(table, parentId)
-				if err != nil {
-					return err
-				}
-			}
+		err = moveNodeIn.Validate()
+		if err != nil {
+			return err
 		}
 
 		err = ctx.Next(fs) //执行下一个中间件
@@ -156,8 +159,8 @@ func (s TreeMiddleware) MoveNode() sqlbuilder.ModelMiddleware {
 			return err
 		}
 
-		if parentId > 0 { //如果父节点有变化，则需要重新计算路径
-			err = s.publishEvent(id, sqlbuilder.Event_Operation_Update)
+		if moveNodeIn.ParentId > 0 { //如果父节点有变化，则需要重新计算路径
+			err = s.publishEvent(moveNodeIn.Id, sqlbuilder.Event_Operation_Update)
 			if err != nil {
 				return err
 			}
@@ -182,20 +185,44 @@ func (s TreeMiddleware) GetSubTree() sqlbuilder.ModelMiddleware {
 	}
 }
 
+type _GetAncestorsIn struct {
+	Path string
+}
+
+func (in *_GetAncestorsIn) Fields() sqlbuilder.Fields {
+	return sqlbuilder.Fields{
+		sqlbuilder.GetField(field.NewPath).BindValue(&in.Path).SetRequired(true),
+	}
+}
+
+func (in *_GetAncestorsIn) Validate() (err error) {
+	return in.Fields().Validate()
+}
+
 func (s TreeMiddleware) GetAncestors() sqlbuilder.ModelMiddleware {
 	return func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
-		pathField, err := fs.GetByNameAsError(sqlbuilder.GetFieldName(field.NewPath))
+		table := fs.FirstMust().GetTable()
+		var in _GetAncestorsIn
+		err = fs.UmarshalModel(&in, table)
 		if err != nil {
 			return err
 		}
-		// 将path 字段转为 ids 数组，做为where条件
-		path := cast.ToString(pathField.GetOriginalValue())
-		pathField.AppendValueFn(sqlbuilder.ValueFnSetFormat(nil)) // 屏蔽path字段
-		if path == "" {
+		err = in.Validate()
+		if err != nil {
+			return err
+		}
+		pathFieldName, err := table.GetFieldNameByAlaisFeild(sqlbuilder.GetField(field.NewPath))
+		if err != nil {
+			return err
+		}
+		if in.Path == "" {
 			return nil
 		}
-		ids := s.splitPath(path)
+		ids := s.splitPath(in.Path)
 		*fs = append(*fs, field.NewId(0).SetValue(ids).SetRequired(true).AppendWhereFn(sqlbuilder.ValueFnForward))
+		*fs = fs.Filter(func(f sqlbuilder.Field) bool {
+			return f.Name != pathFieldName //过滤掉path字段，path 字段不能作为最终where条件
+		})
 		err = ctx.Next(fs) //执行下一个中间件
 		if err != nil {
 			return err
