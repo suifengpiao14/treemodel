@@ -10,28 +10,21 @@ import (
 	"gitlab.huishoubao.com/gopackage/treeflat"
 )
 
-var tableName = "t_tree"
-var topic = fmt.Sprintf(`%s_be6097ae461af2796fc9c3c0bd1cd370`, tableName)
-var table_tree_config = sqlbuilder.NewTableConfig(tableName).AddColumns(
+var topic_routeKey = "tree_middleware" // 话题路由
+var Table_tree_config = sqlbuilder.NewTableConfig("t_tree").AddColumns(
 	sqlbuilder.NewColumn("Fid", sqlbuilder.GetField(field.NewId).SetModelRequered(true)),
 	sqlbuilder.NewColumn("Fparent_id", sqlbuilder.GetField(field.NewParentId).SetModelRequered(true)),
 	sqlbuilder.NewColumn("Fpath", sqlbuilder.GetField(field.NewPath)),
-).WithTopic(topic)
-
-func init() {
-	table_tree_config = table_tree_config.WithConsumerMakers(func(table sqlbuilder.TableConfig) (consumer sqlbuilder.Consumer) {
-		//中间件内的handler 只能是sqlbuilder.FieldIDBHandler类型，应为组件内没有设置表字段和结构体映射关系
+).WithConsumerMakers(func(table sqlbuilder.TableConfig) (consumer sqlbuilder.Consumer) {
+	return sqlbuilder.MakeIdentityEventSubscriber(table, topic_routeKey, func(model _TreeModel) (err error) {
 		service := NewTreeMiddleware()
-		publishTable := table_tree_config.WithHandler(table.GetHandler().GetSqlDBHandler())
-		return sqlbuilder.MakeIdentityEventSubscriber(publishTable, func(model _TreeModel) (err error) {
-			err = service.fillPath(table, model.Id)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
+		err = service.fillPath(table, model.Id)
+		if err != nil {
+			return err
+		}
+		return nil
 	})
-}
+})
 
 type _TreeModel struct {
 	Id       int
@@ -74,42 +67,46 @@ func NewTreeMiddleware() TreeMiddleware {
 }
 
 func (s TreeMiddleware) Insert() sqlbuilder.ModelMiddleware {
-	return func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
-		table := fs.FirstMust().GetTable()
+	return sqlbuilder.ModelMiddleware{
+		Name:        "TreeMiddleware.Insert",
+		Description: "新增后发布新增消息",
+		Fn: func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
+			table := fs.FirstMust().GetTable()
 
-		parentFieldName, err := table.GetFieldNameByAlaisFeild(sqlbuilder.GetField(field.NewParentId))
-		if err != nil {
-			return err
-		}
-
-		parentIdField, err := fs.GetByNameAsError(parentFieldName)
-		if err != nil {
-			return err
-		}
-
-		parentId := cast.ToInt(parentIdField.GetOriginalValue())
-		if parentId > 0 {
-			_, err := s.getNode(table, parentId)
+			parentFieldName, err := table.GetFieldNameByAlaisFeild(sqlbuilder.GetField(field.NewParentId))
 			if err != nil {
 				return err
 			}
-		}
 
-		err = ctx.Next(fs) //执行下一个中间件
+			parentIdField, err := fs.GetByNameAsError(parentFieldName)
+			if err != nil {
+				return err
+			}
 
-		if err != nil {
-			return err
-		}
-		idField, err := fs.GetByNameAsError(sqlbuilder.FieldName_lastInsertId)
-		if err != nil {
-			return err
-		}
-		id := cast.ToInt(idField.GetOriginalValue())
-		err = s.publishEvent(table, id, sqlbuilder.Event_Operation_Insert)
-		if err != nil {
-			return err
-		}
-		return nil
+			parentId := cast.ToInt(parentIdField.GetOriginalValue())
+			if parentId > 0 {
+				_, err := s.getNode(table, parentId)
+				if err != nil {
+					return err
+				}
+			}
+
+			err = ctx.Next(fs) //执行下一个中间件
+
+			if err != nil {
+				return err
+			}
+			idField, err := fs.GetByNameAsError(sqlbuilder.FieldName_lastInsertId)
+			if err != nil {
+				return err
+			}
+			id := cast.ToInt(idField.GetOriginalValue())
+			err = s.publishEvent(table, id, sqlbuilder.Event_Operation_Insert)
+			if err != nil {
+				return err
+			}
+			return nil
+		},
 	}
 }
 
@@ -119,8 +116,8 @@ func (s TreeMiddleware) publishEvent(table sqlbuilder.TableConfig, id int, opera
 		IdentityValue:     cast.ToString(id),
 		IdentityFieldName: sqlbuilder.GetFieldName(field.NewId),
 	}
-	table_tree_config.WithHandler(table.GetHandler().GetSqlDBHandler()).Init()
-	err = table_tree_config.Publish(event) //固定使用Table_tree 表名发布事件,避免多model中间件发布重复事件,避免重复消费事件
+	runTable := table.WithConsumerMakers(Table_tree_config.GetConsumerMakers()...) //这里给个地方拉起消费者，虽然重复添加，但是只会拉起一个消费者
+	err = runTable.Publish(topic_routeKey, event)                                  //固定使用Table_tree 表名发布事件,避免多model中间件发布重复事件,避免重复消费事件
 	if err != nil {
 		return err
 	}
@@ -144,47 +141,54 @@ func (in *_MoveNodeIn) Validate() (err error) {
 }
 
 func (s TreeMiddleware) MoveNode() sqlbuilder.ModelMiddleware {
-	return func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
-		table := fs.FirstMust().GetTable()
-		var moveNodeIn _MoveNodeIn
+	return sqlbuilder.ModelMiddleware{
+		Name: "TreeMiddleware.MoveNode",
+		Fn: func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
+			table := fs.FirstMust().GetTable()
+			var moveNodeIn _MoveNodeIn
 
-		err = fs.UmarshalModel(&moveNodeIn, table)
-		if err != nil {
-			return err
-		}
-		err = moveNodeIn.Validate()
-		if err != nil {
-			return err
-		}
-
-		err = ctx.Next(fs) //执行下一个中间件
-		if err != nil {
-			return err
-		}
-
-		if moveNodeIn.ParentId > 0 { //如果父节点有变化，则需要重新计算路径
-			err = s.publishEvent(table, moveNodeIn.Id, sqlbuilder.Event_Operation_Update)
+			err = fs.UmarshalModel(&moveNodeIn, table)
 			if err != nil {
 				return err
 			}
-		}
-		return nil
+			err = moveNodeIn.Validate()
+			if err != nil {
+				return err
+			}
+
+			err = ctx.Next(fs) //执行下一个中间件
+			if err != nil {
+				return err
+			}
+
+			if moveNodeIn.ParentId > 0 { //如果父节点有变化，则需要重新计算路径
+				err = s.publishEvent(table, moveNodeIn.Id, sqlbuilder.Event_Operation_Update)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		},
 	}
 }
 
 func (s TreeMiddleware) GetSubTree() sqlbuilder.ModelMiddleware {
-	return func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
-		pathField, err := fs.GetByNameAsError(sqlbuilder.GetFieldName(field.NewPath))
-		if err != nil {
-			return err
-		}
-		//给 path 增加where条件
-		pathField.SetRequired(true).SetAllowZero(true).AppendWhereFn(sqlbuilder.ValueFnWhereLikev2(false, true))
-		err = ctx.Next(fs) //执行下一个中间件
-		if err != nil {
-			return err
-		}
-		return nil
+	return sqlbuilder.ModelMiddleware{
+		Name:        "TreeMiddleware.GetSubTree",
+		Description: "将path条件改成like 查询条件，获取子树",
+		Fn: func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
+			pathField, err := fs.GetByNameAsError(sqlbuilder.GetFieldName(field.NewPath))
+			if err != nil {
+				return err
+			}
+			//给 path 增加where条件
+			pathField.SetRequired(true).SetAllowZero(true).AppendWhereFn(sqlbuilder.ValueFnWhereLikev2(false, true))
+			err = ctx.Next(fs) //执行下一个中间件
+			if err != nil {
+				return err
+			}
+			return nil
+		},
 	}
 }
 
@@ -203,35 +207,39 @@ func (in *_GetAncestorsIn) Validate() (err error) {
 }
 
 func (s TreeMiddleware) GetAncestors() sqlbuilder.ModelMiddleware {
-	return func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
-		table := fs.FirstMust().GetTable()
-		var in _GetAncestorsIn
-		err = fs.UmarshalModel(&in, table)
-		if err != nil {
-			return err
-		}
-		err = in.Validate()
-		if err != nil {
-			return err
-		}
-		pathFieldName, err := table.GetFieldNameByAlaisFeild(sqlbuilder.GetField(field.NewPath))
-		if err != nil {
-			return err
-		}
-		if in.Path == "" {
-			return nil
-		}
-		ids := s.splitPath(in.Path)
-		*fs = append(*fs, field.NewId(0).SetValue(ids).SetRequired(true).AppendWhereFn(sqlbuilder.ValueFnForward))
-		*fs = fs.Filter(func(f sqlbuilder.Field) bool {
-			return f.Name != pathFieldName //过滤掉path字段，path 字段不能作为最终where条件
-		})
-		err = ctx.Next(fs) //执行下一个中间件
-		if err != nil {
-			return err
-		}
+	return sqlbuilder.ModelMiddleware{
+		Name:        "TreeMiddlewar.GetAncesstors",
+		Description: "将path切割成ids作为条件查询",
+		Fn: func(ctx *sqlbuilder.ModelMiddlewareContext, fs *sqlbuilder.Fields) (err error) {
+			table := fs.FirstMust().GetTable()
+			var in _GetAncestorsIn
+			err = fs.UmarshalModel(&in, table)
+			if err != nil {
+				return err
+			}
+			err = in.Validate()
+			if err != nil {
+				return err
+			}
+			pathFieldName, err := table.GetFieldNameByAlaisFeild(sqlbuilder.GetField(field.NewPath))
+			if err != nil {
+				return err
+			}
+			if in.Path == "" {
+				return nil
+			}
+			ids := s.splitPath(in.Path)
+			*fs = append(*fs, field.NewId(0).SetValue(ids).SetRequired(true).AppendWhereFn(sqlbuilder.ValueFnForward))
+			*fs = fs.Filter(func(f sqlbuilder.Field) bool {
+				return f.Name != pathFieldName //过滤掉path字段，path 字段不能作为最终where条件
+			})
+			err = ctx.Next(fs) //执行下一个中间件
+			if err != nil {
+				return err
+			}
 
-		return nil
+			return nil
+		},
 	}
 }
 

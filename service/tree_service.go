@@ -13,14 +13,14 @@ type TreeService struct {
 }
 
 func NewTreeService(table sqlbuilder.TableConfig) TreeService {
-	s := TreeService{
-		table: table,
-	}
-	treeTable := s.treeMiddleware.GetMiddlewareTable(table)
-	err := table.CheckMissOutFieldName(treeTable)
+	err := table.CheckMissOutFieldName(treemodel.Table_tree_config)
 	if err != nil {
 		panic(err)
 	}
+	s := TreeService{
+		table: table,
+	}
+
 	return s
 }
 
