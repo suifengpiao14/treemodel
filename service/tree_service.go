@@ -1,9 +1,11 @@
 package example
 
 import (
-	"github.com/suifengpiao14/sqlbuilder"
+	"context"
+
 	"github.com/suifengpiao14/treemodel"
 	"github.com/suifengpiao14/treemodel/field"
+	"gitlab.huishoubao.com/gopackage/sqlbuilder"
 )
 
 // TreeService 服务类案例
@@ -38,7 +40,8 @@ func (in *AddNodeIn) Fields() sqlbuilder.Fields {
 }
 
 func (s TreeService) AddNode(in AddNodeIn) (err error) {
-	_, _, err = s.table.Repository().InsertWithLastId(in.Fields(), func(p *sqlbuilder.InsertParam) {
+	ctx := context.Background()
+	_, _, err = s.table.Repository().InsertWithLastId(ctx, in.Fields(), func(p *sqlbuilder.InsertParam) {
 		p.WithModelMiddleware(s.treeMiddleware.Insert())
 	})
 	if err != nil {
@@ -59,8 +62,8 @@ func (s TreeService) MoveNode(id int, newParentID int) (err error) {
 		field.NewId(id).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward),
 		field.NewParentId(newParentID).SetRequired(true).SetAllowZero(true),
 	}
-
-	err = s.table.Repository().Update(fields, func(p *sqlbuilder.UpdateParam) {
+	ctx := context.Background()
+	err = s.table.Repository().Update(ctx, fields, func(p *sqlbuilder.UpdateParam) {
 		p.WithModelMiddleware(s.treeMiddleware.MoveNode())
 	})
 	if err != nil {
@@ -76,7 +79,8 @@ func (s TreeService) GetSubTree(pathPrefix string, dst any) (err error) {
 		field.NewPath(pathPrefix),
 		field.NewDeletedAt(),
 	}
-	err = s.table.Repository().All(dst, fields, func(p *sqlbuilder.ListParam) {
+	ctx := context.Background()
+	err = s.table.Repository().All(ctx, dst, fields, func(p *sqlbuilder.ListParam) {
 		p.WithModelMiddleware(s.treeMiddleware.GetSubTree())
 	})
 	if err != nil {
@@ -91,7 +95,8 @@ func (s TreeService) GetAncestors(path string, dst any) (err error) {
 		field.NewPath(path),
 		field.NewDeletedAt(),
 	}
-	err = s.table.Repository().All(dst, fields, func(p *sqlbuilder.ListParam) {
+	ctx := context.Background()
+	err = s.table.Repository().All(ctx, dst, fields, func(p *sqlbuilder.ListParam) {
 		p.WithModelMiddleware(s.treeMiddleware.GetAncestors())
 	})
 	if err != nil {

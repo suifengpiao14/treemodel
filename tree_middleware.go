@@ -1,22 +1,25 @@
 package treemodel
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cast"
-	"github.com/suifengpiao14/sqlbuilder"
 	"github.com/suifengpiao14/treemodel/field"
+	"gitlab.huishoubao.com/gopackage/sqlbuilder"
 	"gitlab.huishoubao.com/gopackage/treeflat"
 )
 
-var topic_routeKey = "tree_middleware" // 话题路由
+var topic_routeKey = "tree_middleware" // 话题路由"
 var Table_tree_config = sqlbuilder.NewTableConfig("t_tree").AddColumns(
 	sqlbuilder.NewColumn("Fid", sqlbuilder.GetField(field.NewId).SetModelRequered(true)),
 	sqlbuilder.NewColumn("Fparent_id", sqlbuilder.GetField(field.NewParentId).SetModelRequered(true)),
 	sqlbuilder.NewColumn("Fpath", sqlbuilder.GetField(field.NewPath)),
 ).WithConsumerMakers(func(table sqlbuilder.TableConfig) (consumer sqlbuilder.Consumer) {
-	return sqlbuilder.MakeIdentityEventSubscriber(table, topic_routeKey, func(model _TreeModel) (err error) {
+	return sqlbuilder.MakeIdentityEventSubscriber(table, topic_routeKey, func(event sqlbuilder.IdentityEvent) bool {
+		return true
+	}, func(model _TreeModel) (err error) {
 		service := NewTreeMiddleware()
 		err = service.fillPath(table, model.Id)
 		if err != nil {
@@ -248,7 +251,8 @@ func (s TreeMiddleware) getNode(table sqlbuilder.TableConfig, id int) (model *_T
 		field.NewId(id).SetRequired(true).AppendWhereFn(sqlbuilder.ValueFnForward),
 	}
 	model = &_TreeModel{}
-	err = table.Repository().FirstMustExists(model, fields)
+	ctx := context.Background()
+	err = table.Repository().FirstMustExists(ctx, model, fields)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +305,10 @@ func (s TreeMiddleware) fillPath(table sqlbuilder.TableConfig, id int) (err erro
 		return err
 	}
 
-	trees := treeflat.BuildTree(ancestors) //计算path
+	trees, err := treeflat.BuildTree(ancestors, nil) //计算fillPath
+	if err != nil {
+		return err
+	}
 	ancestors = treeflat.FlattenTree(trees)
 	for _, ancestor := range ancestors {
 		if ancestor.Path != ancestor.calPath {
@@ -319,7 +326,8 @@ func (s TreeMiddleware) reBuildPath(table sqlbuilder.TableConfig, id int, newPat
 		field.NewId(id).SetRequired(true).ShieldUpdate(true).AppendWhereFn(sqlbuilder.ValueFnForward),
 		field.NewPath(newPath),
 	}
-	err = table.Repository().Update(pathFs)
+	ctx := context.Background()
+	err = table.Repository().Update(ctx, pathFs)
 	if err != nil {
 		return err
 	}
@@ -332,7 +340,8 @@ func (s TreeMiddleware) reBuildPath(table sqlbuilder.TableConfig, id int, newPat
 				f.ValueFns.Append(sqlbuilder.ValueFnOnlyForData(sqlbuilder.ValueFnReplace(oldPath)))
 			}),
 		}
-		err = table.Repository().Update(pathFs)
+		ctx := context.Background()
+		err = table.Repository().Update(ctx, pathFs)
 		if err != nil {
 			return err
 		}
@@ -349,7 +358,8 @@ func (s TreeMiddleware) getAncestors(table sqlbuilder.TableConfig, path string) 
 		field.NewId(0).SetValue(ids).SetRequired(true).SetAllowZero(true).AppendWhereFn(sqlbuilder.ValueFnForward),
 		field.NewDeletedAt(),
 	}
-	err = table.Repository().All(&models, fields)
+	ctx := context.Background()
+	err = table.Repository().All(ctx, &models, fields)
 	if err != nil {
 		return nil, err
 	}

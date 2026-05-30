@@ -1,8 +1,8 @@
 package field
 
 import (
-	"github.com/suifengpiao14/commonlanguage"
-	"github.com/suifengpiao14/sqlbuilder"
+	"gitlab.huishoubao.com/gopackage/commonlanguage"
+	"gitlab.huishoubao.com/gopackage/sqlbuilder"
 )
 
 func NewId(id int) *sqlbuilder.Field {
